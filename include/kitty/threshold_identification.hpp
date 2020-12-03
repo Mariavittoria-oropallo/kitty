@@ -83,17 +83,18 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
   bool is_bi = false;
   bool is_neg = false;
 
-  auto num_vars=tt.num_vars();
+  auto num_var =tt.num_vars();
+  auto num_bit = tt.num_bits();
 
   std::vector<bool> neg_variables;
 
 
   /* check if tt is negative unate or binate*/
-  for (auto i=0; i<num_vars; i++){
+  for (auto i=0; i<num_var; i++){
     auto const tt0 = cofactor0( tt, i);
     auto const tt1 = cofactor1( tt, i);
 
-    for(auto j=0; j<tt.num_bits(); j++){
+    for(auto j=0; j<num_bit; j++){
       if (get_bit(tt1, j) >  get_bit(tt0, j))
         is_higher = true;
 
@@ -131,9 +132,9 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
   std::vector<Constraint> constraints;
 
   /*variables*/
-  for(auto bit=0; bit< tt.num_bit(); bit++){
+  for(auto bit=0; bit< num_bit; bit++){
     Constraint constraint;
-    for(auto var = 0; var < tt.num_var(); var++){
+    for(auto var = 0; var < num_var; var++){
       constraint.variables.emplace_back(var);
 
       if( get_bit(tt, bit) == 1){
@@ -153,19 +154,19 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
   }
 
   /*coefficients*/
-  for(auto var = 0; var < tt.num_var(); var++)
+  for(auto var = 0; var < num_var; var++)
   {
     uint8_t coef = 0;
     uint64_t bit;
     uint32_t rep = 2 ^ ( tt.get_var() );
-    while ( bit < tt.num_bit() )
+    while ( bit < num_bit )
     {
       for ( auto i = 0; i < rep; i++ )
       {
         constraints[bit].coefficients.emplace_back( coef );
         bit++;
       }
-      if (coef = 0)
+      if (coef == 0)
         coef = 1;
       else
         coef = 0;
@@ -174,12 +175,12 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
   }
 
   /*T coefficient*/
-  for(auto bit = 0; bit< tt.get_bit(); bit++){
+  for(auto bit = 0; bit< num_bit; bit++){
     constraints[bit].coefficients.emplace_back(-1);
   }
 
   /*Positive weights*/
-  for(auto var = 0; var <= tt.num_var(); var++){
+  for(auto var = 0; var <= num_var; var++){
     Constraint constraint;
     constraint.variables.emplace_back(var);
     constraint.coefficients.emplace_back(1);
@@ -194,7 +195,7 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
 
   /* the objective function */
   os << "min:";
-  for (auto l = 1u; l <= tt.num_var() +1; ++l) {
+  for (auto l = 1u; l <= num_var +1; ++l) {
     os << " +" << 1 << " w" << "_" << l;
   }
   os << " ;" << std::endl;
@@ -205,8 +206,8 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
     for (auto v = 0u; v < con.variables.size(); ++v) {
       auto &var = con.variables.at(v);
       auto &cof = con.coefficients.at(v);
-      assert(1 <= var.i && var.i <= num_operations);
-      assert(1 <= var.l && var.l <= num_timeframes);
+      assert(1 <= var && var <= num_var);
+      assert(1 <= var && var <= num_bit);
       if (cof == 0) { continue; }
       if (cof == 1) { os << "+"; }
       else if (cof == -1) { os << "-"; }
@@ -233,18 +234,19 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
 
   /* variable type declaration */
   os << "int ";
-  for (auto i = 1u; i <= tt.num_var()+1; ++i) {
+  for (auto i = 1u; i <= num_var +1; ++i) {
       os << "x" << "_" << i << ", ";
   }
   os << ";" << std::endl;
 
 
   //lp_solve
-  lp_solve -lp file.lp;
+  std::system( "lp_solve scheduling.lp" );
 
   /* Read LP model */
-  linear_form = read_LP("file.lp", FULL, "test model");
-  if(linear_form.empty()) {
+  lprec *lp;
+  lp = read_LP("file.lp", FULL, "test model");
+  if(lp == NULL) {
     return false;
   }
     /* if tt is TF: */
@@ -253,7 +255,7 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
     /* push the weight and threshold values into `linear_form` */
     if ( plf )
     {
-      *plf = linear_form;
+      *plf = lp;
     }
     return true;
   }
@@ -264,16 +266,18 @@ template<typename TT, typename = std::enable_if_t<is_complete_truth_table<TT>::v
 void calc_new_tt(const TT& tt, uint32_t var){
 
   std::vector<bool> marked;
+  auto num_var =tt.num_vars();
+  auto num_bit = tt.num_bits();
 
   /*init vector marked*/
-  for(auto i = 0; i<tt.num_bits(); i++){
+  for(auto i = 0; i<num_bit; i++){
     marked.emplace_back(false);
   }
 
-  for(auto i = 0; i<tt.num_bits(); i++){
+  for(auto i = 0; i<num_bit; i++){
     if(!marked[i]){
-      auto bit1 = tt.get_bit(i);
-      auto bit2 = tt.get_bit(i + 2^var);
+      auto bit1 = get_bit(tt, i);
+      auto bit2 = get_bit(tt, i + 2^var);
 
       if(bit1 == 1)
         set_bit(tt, i + 2^var);   //set bit i+2^var to true
