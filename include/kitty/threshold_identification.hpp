@@ -33,8 +33,25 @@
 #pragma once
 
 #include <vector>
-// #include <lpsolve/lp_lib.h> /* uncomment this line to include lp_solve */
+#include <fstream>
+#include <lpsolve/lp_lib.h> /* uncomment this line to include lp_solve */
 #include "traits.hpp"
+#include "operations.hpp"
+#include "static_truth_table.hpp"
+#include "dynamic_truth_table.hpp"
+#include "bit_operations.hpp"
+
+enum Constraint_Type {
+  G , L, E
+};
+/* >=      <=  == */
+
+struct Constraint {
+  std::vector<uint64_t> variables;
+  std::vector<int64_t> coefficients;
+  Constraint_Type type;
+  uint64_t constant; /* the right-hand side constant */
+};
 
 namespace kitty
 {
@@ -60,17 +77,220 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
 {
   std::vector<int64_t> linear_form;
 
+  bool is_less = false;
+  bool is_higher = false;
+  bool equal = false;
+  bool is_bi = false;
+  bool is_neg = false;
+
+  auto num_vars=tt.num_vars();
+
+  std::vector<bool> neg_variables;
+
+
+  /* check if tt is negative unate or binate*/
+  for (auto i=0; i<num_vars; i++){
+    auto const tt0 = cofactor0( tt, i);
+    auto const tt1 = cofactor1( tt, i);
+
+    for(auto j=0; j<tt.num_bits(); j++){
+      if (get_bit(tt1, j) >  get_bit(tt0, j))
+        is_higher = true;
+
+      if (get_bit(tt1, j) <  get_bit(tt0, j))
+        is_less = true;
+    }
+
+
+    if(is_higher == false && is_less == true)
+    {
+      is_neg = true;
+
+      /*calc new truth table, positive unate with respect to variable i*/
+      calc_new_tt(tt,i);
+    }
+
+    if(is_higher == true && is_less == true)
+      is_bi = true;
+
+    neg_variables.emplace_back(is_neg);
+
+    is_higher = false;
+    is_less = false;
+    equal = false;
+  }
+
   /* TODO */
+
   /* if tt is non-TF: */
+  if(is_bi)
   return false;
 
-  /* if tt is TF: */
-  /* push the weight and threshold values into `linear_form` */
-  if ( plf )
-  {
-    *plf = linear_form;
+  /*constraint*/
+  std::vector<bool> visited;
+  std::vector<Constraint> constraints;
+
+  /*variables*/
+  for(auto bit=0; bit< tt.num_bit(); bit++){
+    Constraint constraint;
+    for(auto var = 0; var < tt.num_var(); var++){
+      constraint.variables.emplace_back(var);
+
+      if( get_bit(tt, bit) == 1){
+        constraint.type = G;
+        constraint.constant = 0;
+      }
+      else if(get_bit(tt, bit) == 0){
+        constraint.type = L;
+        constraint.constant = 1;
+      }
+
+    }
+    constraint.variables.emplace_back(var+1);
+
+    constraints.emplace_back(constraint);
+
   }
-  return true;
+
+  /*coefficients*/
+  for(auto var = 0; var < tt.num_var(); var++)
+  {
+    uint8_t coef = 0;
+    uint64_t bit;
+    uint32_t rep = 2 ^ ( tt.get_var() );
+    while ( bit < tt.num_bit() )
+    {
+      for ( auto i = 0; i < rep; i++ )
+      {
+        constraints[bit].coefficients.emplace_back( coef );
+        bit++;
+      }
+      if (coef = 0)
+        coef = 1;
+      else
+        coef = 0;
+
+    }
+  }
+
+  /*T coefficient*/
+  for(auto bit = 0; bit< tt.get_bit(); bit++){
+    constraints[bit].coefficients.emplace_back(-1);
+  }
+
+  /*Positive weights*/
+  for(auto var = 0; var <= tt.num_var(); var++){
+    Constraint constraint;
+    constraint.variables.emplace_back(var);
+    constraint.coefficients.emplace_back(1);
+    constraint.constant = 0;
+    constraint.type = G;
+  }
+
+
+
+  //print_lp
+  std::ofstream os("file.lp", std::ofstream::out);
+
+  /* the objective function */
+  os << "min:";
+  for (auto l = 1u; l <= tt.num_var() +1; ++l) {
+    os << " +" << 1 << " w" << "_" << l;
+  }
+  os << " ;" << std::endl;
+
+  /* the constraints */
+  for (auto const &con : constraints) {
+    assert(con.variables.size() == con.coefficients.size());
+    for (auto v = 0u; v < con.variables.size(); ++v) {
+      auto &var = con.variables.at(v);
+      auto &cof = con.coefficients.at(v);
+      assert(1 <= var.i && var.i <= num_operations);
+      assert(1 <= var.l && var.l <= num_timeframes);
+      if (cof == 0) { continue; }
+      if (cof == 1) { os << "+"; }
+      else if (cof == -1) { os << "-"; }
+      os << " w" << "_" << var;
+    }
+    switch (con.type) {
+    case G: {
+      os << ">=";
+      break;
+    }
+    case L: {
+      os << "<=";
+      break;
+    }
+    case E: {
+      os << "=";
+      break;
+    }
+    default:
+      assert(false);
+    }
+    os << " " << con.constant << ";" << std::endl;
+  }
+
+  /* variable type declaration */
+  os << "int ";
+  for (auto i = 1u; i <= tt.num_var()+1; ++i) {
+      os << "x" << "_" << i << ", ";
+  }
+  os << ";" << std::endl;
+
+
+  //lp_solve
+  lp_solve -lp file.lp;
+
+  /* Read LP model */
+  linear_form = read_LP("file.lp", FULL, "test model");
+  if(linear_form.empty()) {
+    return false;
+  }
+    /* if tt is TF: */
+  else{
+
+    /* push the weight and threshold values into `linear_form` */
+    if ( plf )
+    {
+      *plf = linear_form;
+    }
+    return true;
+  }
+
 }
+
+template<typename TT, typename = std::enable_if_t<is_complete_truth_table<TT>::value>>
+void calc_new_tt(const TT& tt, uint32_t var){
+
+  std::vector<bool> marked;
+
+  /*init vector marked*/
+  for(auto i = 0; i<tt.num_bits(); i++){
+    marked.emplace_back(false);
+  }
+
+  for(auto i = 0; i<tt.num_bits(); i++){
+    if(!marked[i]){
+      auto bit1 = tt.get_bit(i);
+      auto bit2 = tt.get_bit(i + 2^var);
+
+      if(bit1 == 1)
+        set_bit(tt, i + 2^var);   //set bit i+2^var to true
+      if(bit1 == 0)
+        clear_bit(tt, i+2^var);
+
+      if(bit2 == 1)
+        set_bit(tt, i);   //set bit i+2^var to true
+      if(bit2 == 0)
+        clear_bit(tt, i);
+
+      marked[i] = true;
+      marked[i+2^var] = true;
+    }
+  }
+
+}
+
 
 } /* namespace kitty */
