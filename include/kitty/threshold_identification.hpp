@@ -79,7 +79,6 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
 
   bool is_less = false;
   bool is_higher = false;
-  bool equal = false;
   bool is_bi = false;
   bool is_neg = false;
 
@@ -118,16 +117,14 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
 
     is_higher = false;
     is_less = false;
-    equal = false;
   }
-
-  /* TODO */
+  
 
   /* if tt is non-TF: */
   if(is_bi)
   return false;
 
-  /*constraint*/
+  /*constraints*/
   std::vector<bool> visited;
   std::vector<Constraint> constraints;
 
@@ -145,10 +142,8 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
         constraint.type = L;
         constraint.constant = 1;
       }
-
     }
-    constraint.variables.emplace_back(var+1);
-
+    constraint.variables.emplace_back(num_var + 1);
     constraints.emplace_back(constraint);
 
   }
@@ -241,7 +236,7 @@ bool is_threshold( const TT& tt, std::vector<int64_t>* plf = nullptr )
 
 
   //lp_solve
-  std::system( "lp_solve scheduling.lp" );
+  std::system( "lp_solve file.lp" );
 
   /* Read LP model */
   lprec *lp;
@@ -266,7 +261,6 @@ template<typename TT, typename = std::enable_if_t<is_complete_truth_table<TT>::v
 void calc_new_tt(const TT& tt, uint32_t var){
 
   std::vector<bool> marked;
-  auto num_var =tt.num_vars();
   auto num_bit = tt.num_bits();
 
   /*init vector marked*/
