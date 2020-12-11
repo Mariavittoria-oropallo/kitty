@@ -238,7 +238,9 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
   //lp_solve
   lprec *lp;
   auto num_rows = constraints.size();
-  REAL row[num_var+1 + 1];     /* must be 1 more than number of columns ! */
+  //REAL row[num_var+1 + 1];     /* must be 1 more than number of columns ! */
+  std::vector<double> row;
+  //REAL *row = nullptr;
 
   /* Create a new LP model */
   lp = make_lp(0, num_var+1);
@@ -249,20 +251,22 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
 
   set_add_rowmode(lp, TRUE);
 
+  row.emplace_back(1.0);
   /*the objective function*/
   for(uint64_t col = 1; col<=num_var+1; col++){
-    row[col] = 1.0;
+    row.emplace_back(1.0);
   }
-  set_obj_fn(lp, row);
+
+  set_obj_fn(lp, row.data());
 
   for(uint64_t rows = 0; rows < num_rows; rows++){
     for(uint64_t col = 1; col <= num_var+1; col++){
       row[col] = constraints[rows].coefficients[col-1];
     }
     if(constraints[rows].type == G )
-      add_constraint(lp, row, GE, constraints[rows].constant);
+      add_constraint(lp, row.data(), GE, constraints[rows].constant);
     else if (constraints[rows].type == L)
-      add_constraint(lp, row, LE, constraints[rows].constant);
+      add_constraint(lp, row.data(), LE, constraints[rows].constant);
   }
 
   set_add_rowmode(lp, FALSE);
@@ -280,15 +284,15 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
     printf("Objective value: %f\n", get_objective(lp));
 
     /* variable values */
-    get_variables(lp, row);
+    get_variables(lp, row.data());
     for(uint64_t i = 0; i < num_var+1; i++){
+      /* push the weight and threshold values into `linear_form` */
       //linear_form.push_back(row[i]);
       linear_form.push_back((int)(row[i]));
     }
     for(uint64_t j = 0; j <= num_var +1; j++)
     {
       printf( "%s: %f\n", get_col_name( lp, j + 1 ), row[j] );
-      /* push the weight and threshold values into `linear_form` */
     }
 
   }
@@ -296,7 +300,7 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
     return false;
 
 
-    if ( plf )
+  if ( plf )
   {
     *plf = linear_form;
   }
