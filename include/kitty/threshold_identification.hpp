@@ -41,6 +41,8 @@
 #include "static_truth_table.hpp"
 #include "dynamic_truth_table.hpp"
 #include "bit_operations.hpp"
+#include "implicant.hpp"
+#include "cube.hpp"
 
 enum Constraint_Type {
   G , L, E
@@ -85,21 +87,14 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
   uint64_t num_var = tt.num_vars();
   uint64_t num_bit = tt.num_bits();
 
- // std::vector<uint64_t> bits;
   std::vector<bool> neg_variables;
 
-  /*
-  //copy bits of tt in "bits"
-  for(uint64_t i=0; i<num_bit; i++){
-    if(get_bit(tt, i) == 1)
-      bits.emplace_back(1);
-    else if (get_bit(tt, i) == 0)
-      bits.emplace_back(0);
-  }
-  */
+
 
   /* check if tt is negative unate or binate*/
+
   for (uint64_t var=0u; var<num_var; var++){
+
     auto const tt0 = cofactor0( tt, var);
     auto const tt1 = cofactor1( tt, var);
 
@@ -112,8 +107,7 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
     }
 
 
-    if( !is_higher && is_less )
-    {
+    if( !is_higher && is_less ){   //negative unate in variable "var"
       is_neg = true;
 
       /* evaluate f*, positive unate in variable "var" */
@@ -124,101 +118,89 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
         marked.emplace_back(false);
       }
 
+      /*change the tt from f to fstar*/
       for(uint64_t bit = 0; bit<num_bit; bit++){
         if(!marked[bit]){
           auto bit1 = get_bit( tt, bit);
           auto bit2 = get_bit( tt, bit + (1u << var));
-          //auto bit1 = bits[bit];
-          //auto bit2 = bits[bit + (1u << var)];
 
           if(bit1 == 1)
-            set_bit( tt, bit + (1u << var));   //set bit i+2^var to true
-            //bits[bit + (1u << var)] = 1;
+            set_bit( tt, bit + (1u << var));
 
           if(bit1 == 0)
             clear_bit( tt, bit+ (1u << var));
-            //bits[bit + (1u << var)] = 0;
 
           if(bit2 == 1)
-            set_bit( tt, bit);   //set bit i+2^var to true
-            //bits[bit] = 1;
+            set_bit( tt, bit);
 
           if(bit2 == 0)
             clear_bit( tt, bit);
-            //bits[bit] = 0;
 
           marked[bit] = true;
           marked[bit + (1u << var)] = true;
         }
       }
-
     }
-
 
     if( is_higher && is_less )    /* TT IS BINATE  */
-    {
       return false;
-    }
 
     neg_variables.emplace_back(is_neg);
-
     is_higher = false;
     is_less = false;
 
   }
 
+  auto cube_ONSET = get_prime_implicants_morreale(tt);
+  auto tt_neg = unary_not(tt);
+  auto cube_OFFSET = get_prime_implicants_morreale(tt_neg);
 
-  /*constraints*/
-  std::vector<bool> visited;
   std::vector<Constraint> constraints;
 
-  /*variables*/
-  for(uint64_t bit=0; bit < num_bit; bit++){
+  for (auto& i : cube_ONSET){
     Constraint constraint;
     for(uint64_t var = 0; var < num_var; var++){
-      constraint.variables.emplace_back(var);
-
-      if( get_bit( tt, bit) == 1){
-      //if( bits[bit] == 1){
-        constraint.type = G;
-        constraint.constant = 0;
+      if (i.get_mask(var) == 1){
+        if(i.get_bit(var) == 1){
+          constraint.variables.emplace_back(var);
+          constraint.coefficients.emplace_back(1);
+        }
+        else{
+          constraint.variables.emplace_back(var);
+          constraint.coefficients.emplace_back(0);
+        }
       }
-     else if(get_bit( tt, bit) == 0){
-     // else if(bits[bit] == 0){
-        constraint.type = L;
-        constraint.constant = -1.0;
+      else{
+        constraint.variables.emplace_back(var);
+        constraint.coefficients.emplace_back(0);
       }
     }
-    constraint.variables.emplace_back(num_var);
+    constraint.variables.emplace_back(num_var+1);
+    constraint.coefficients.emplace_back(-1);
+    constraint.type = G;
+    constraint.constant = 0;
     constraints.emplace_back(constraint);
-
   }
 
-  /*coefficients*/
-  for(uint64_t var = 0; var < num_var; var++)
-  {
-    uint8_t coef = 0;
-    uint64_t bit = 0;
-    uint64_t rep = 1u << var;  //2^var
-    while ( bit < num_bit )
-    {
-      for (uint32_t i = 0; i < rep; i++ )
-      {
-        constraints[bit].coefficients.emplace_back( coef );
-        bit++;
+  for (auto& i : cube_OFFSET){
+    Constraint constraint;
+    for(uint64_t var = 0; var < num_var; var++){
+      if (i.get_mask(var) == 0){
+          constraint.variables.emplace_back(var);
+          constraint.coefficients.emplace_back(1);
       }
-      if (coef == 0)
-        coef = 1;
-      else
-        coef = 0;
-
+      else{
+        constraint.variables.emplace_back(var);
+        constraint.coefficients.emplace_back(0);
+      }
     }
+    constraint.variables.emplace_back(num_var+1);
+    constraint.coefficients.emplace_back(-1);
+    constraint.type = L;
+    constraint.constant = -1;
+    constraints.emplace_back(constraint);
   }
 
-  /*T coefficient*/
-  for(uint64_t bit = 0; bit < num_bit; bit++){
-    constraints[bit].coefficients.emplace_back(-1);
-  }
 
   /*Positive weights*/
   for(uint64_t var = 0; var <= num_var; var++){
@@ -234,13 +216,10 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
   }
 
 
-
   //lp_solve
   lprec *lp;
   auto num_rows = constraints.size();
-  //REAL row[num_var+1 + 1];     /* must be 1 more than number of columns ! */
   std::vector<double> row;
-  //REAL *row = nullptr;
 
   /* Create a new LP model */
   lp = make_lp(0, num_var+1);
@@ -251,8 +230,8 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
 
   set_add_rowmode(lp, TRUE);
 
-  row.emplace_back(1.0);
   /*the objective function*/
+  row.emplace_back(1.0);
   for(uint64_t col = 1; col<=num_var+1; col++){
     row.emplace_back(1.0);
   }
@@ -287,21 +266,18 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
     get_variables(lp, row.data());
     for(uint64_t i = 0; i < num_var+1; i++){
       /* push the weight and threshold values into `linear_form` */
-      //linear_form.push_back(row[i]);
       linear_form.push_back((int)(row[i]));
     }
-    for(uint64_t j = 0; j <= num_var +1; j++)
-    {
+
+    /*print values*/
+    for(uint64_t j = 0; j <= num_var +1; j++){
       printf( "%s: %f\n", get_col_name( lp, j + 1 ), row[j] );
     }
-
   }
   else
     return false;
 
-
-  if ( plf )
-  {
+  if ( plf ){
     *plf = linear_form;
   }
   return true;
