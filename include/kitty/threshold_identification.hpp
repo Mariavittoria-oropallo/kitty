@@ -44,14 +44,14 @@
 #include "implicant.hpp"
 #include "cube.hpp"
 
+
 enum Constraint_Type {
   G , L, E
 };
 /* >=      <=  == */
 
 struct Constraint {
-  std::vector<uint64_t> variables;
-  std::vector<int64_t> coefficients;
+  std::vector<int64_t> weights;
   Constraint_Type type;
   int constant; /* the right-hand side constant */
 };
@@ -82,16 +82,12 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
   std::vector<int64_t> linear_form;
   bool is_less = false;
   bool is_higher = false;
-  bool is_neg = false;
 
   uint64_t num_var = tt.num_vars();
   uint64_t num_bit = tt.num_bits();
 
-  std::vector<bool> neg_variables;
 
-
-
-  /* check if tt is negative unate or binate*/
+  /* Check if tt is negative unate or binate */
 
   for (uint64_t var=0u; var<num_var; var++){
 
@@ -106,55 +102,25 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
         is_less = true;
     }
 
-
-    if( !is_higher && is_less ){   //negative unate in variable "var"
-      is_neg = true;
-
-      /* evaluate f*, positive unate in variable "var" */
-      std::vector<bool> marked;
-
-      /*init vector marked*/
-      for(uint64_t bit = 0; bit < num_bit; bit++){
-        marked.emplace_back(false);
-      }
-
-      /*change the tt from f to fstar*/
-      for(uint64_t bit = 0; bit<num_bit; bit++){
-        if(!marked[bit]){
-          auto bit1 = get_bit( tt, bit);
-          auto bit2 = get_bit( tt, bit + (1u << var));
-
-          if(bit1 == 1)
-            set_bit( tt, bit + (1u << var));
-
-          if(bit1 == 0)
-            clear_bit( tt, bit+ (1u << var));
-
-          if(bit2 == 1)
-            set_bit( tt, bit);
-
-          if(bit2 == 0)
-            clear_bit( tt, bit);
-
-          marked[bit] = true;
-          marked[bit + (1u << var)] = true;
-        }
-      }
+    /*Change f into f_star*/
+    if( !is_higher && is_less ){
+      flip_inplace(tt, var);
     }
 
     if( is_higher && is_less )    /* TT IS BINATE  */
       return false;
 
-    neg_variables.emplace_back(is_neg);
     is_higher = false;
     is_less = false;
 
   }
 
+  /* ONSET anf OFFSET*/
   auto cube_ONSET = get_prime_implicants_morreale(tt);
   auto tt_neg = unary_not(tt);
   auto cube_OFFSET = get_prime_implicants_morreale(tt_neg);
 
+  /*The Constraints*/
   std::vector<Constraint> constraints;
 
   for (auto& i : cube_ONSET){
@@ -162,21 +128,17 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
     for(uint64_t var = 0; var < num_var; var++){
       if (i.get_mask(var) == 1){
         if(i.get_bit(var) == 1){
-          constraint.variables.emplace_back(var);
-          constraint.coefficients.emplace_back(1);
+          constraint.weights.emplace_back(1);
         }
         else{
-          constraint.variables.emplace_back(var);
-          constraint.coefficients.emplace_back(0);
+          constraint.weights.emplace_back(0);
         }
       }
       else{
-        constraint.variables.emplace_back(var);
-        constraint.coefficients.emplace_back(0);
+        constraint.weights.emplace_back(0);
       }
     }
-    constraint.variables.emplace_back(num_var+1);
-    constraint.coefficients.emplace_back(-1);
+    constraint.weights.emplace_back(-1);
     constraint.type = G;
     constraint.constant = 0;
     constraints.emplace_back(constraint);
@@ -186,16 +148,13 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
     Constraint constraint;
     for(uint64_t var = 0; var < num_var; var++){
       if (i.get_mask(var) == 0){
-          constraint.variables.emplace_back(var);
-          constraint.coefficients.emplace_back(1);
+        constraint.weights.emplace_back(1);
       }
       else{
-        constraint.variables.emplace_back(var);
-        constraint.coefficients.emplace_back(0);
+        constraint.weights.emplace_back(0);
       }
     }
-    constraint.variables.emplace_back(num_var+1);
-    constraint.coefficients.emplace_back(-1);
+    constraint.weights.emplace_back(-1);
     constraint.type = L;
     constraint.constant = -1;
     constraints.emplace_back(constraint);
@@ -206,17 +165,18 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
   for(uint64_t var = 0; var <= num_var; var++){
     Constraint constraint;
     for(uint64_t i = 0; i <= num_var; i++){
-      constraint.coefficients.emplace_back(0);
+      constraint.weights.emplace_back(0);
     }
-    constraint.variables.emplace_back(var);
-    constraint.coefficients[var] = 1;
+   // constraint.variables.emplace_back(var);
+    constraint.weights[var] = 1;
     constraint.constant = 0;
     constraint.type = G;
     constraints.emplace_back(constraint);
   }
 
 
-  //lp_solve
+  /*LP*/
+
   lprec *lp;
   auto num_rows = constraints.size();
   std::vector<double> row;
@@ -240,7 +200,7 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
 
   for(uint64_t rows = 0; rows < num_rows; rows++){
     for(uint64_t col = 1; col <= num_var+1; col++){
-      row[col] = constraints[rows].coefficients[col-1];
+      row[col] = constraints[rows].weights[col-1];
     }
     if(constraints[rows].type == G )
       add_constraint(lp, row.data(), GE, constraints[rows].constant);
