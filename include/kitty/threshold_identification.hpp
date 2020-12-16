@@ -71,28 +71,30 @@ namespace kitty
   The linear form of a TF is the vector [w_1, ..., w_n; T].
 
   \param tt_fstar The truth table
-  \param plf Pointer to a vector that will hold a linear form of `tt` if it is a TF.
-             The linear form has `tt.num_vars()` weight values and the threshold value
+  \param plf Pointer to a vector that will hold a linear form of `f` if it is a TF.
+             The linear form has `f.num_vars()` weight values and the threshold value
              in the end.
-  \return `true` if `tt` is a TF; `false` if `tt` is a non-TF.
+  \return `true` if `f` is a TF; `false` if `f` is a non-TF.
 */
 template<typename TT, typename = std::enable_if_t<is_complete_truth_table<TT>::value>>
-bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
+bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
 {
+  TT f = tt;
   std::vector<int64_t> linear_form;
   bool is_less = false;
   bool is_higher = false;
 
-  uint64_t num_var = tt.num_vars();
-  uint64_t num_bit = tt.num_bits();
+  uint64_t num_var = f.num_vars();
+  uint64_t num_bit = f.num_bits();
 
+  std::vector<bool> neg_variables(num_var, false);
 
-  /* Check if tt is negative unate or binate */
+  /* Check if f is negative unate or binate */
 
   for (uint64_t var=0u; var<num_var; var++){
 
-    auto const tt0 = cofactor0( tt, var);
-    auto const tt1 = cofactor1( tt, var);
+    auto const tt0 = cofactor0( f, var);
+    auto const tt1 = cofactor1( f, var);
 
     for(uint64_t j=0u; j<num_bit; j++){
       if (get_bit(tt1, j) >  get_bit(tt0, j))
@@ -102,10 +104,14 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
         is_less = true;
     }
 
-    /*Change f into f_star*/
-    if( !is_higher && is_less ){
-      flip_inplace(tt, var);
+
+    if( !is_higher && is_less ){ //NEGATIVE UNATE IN VARIABLE VAR
+      /*Change f into f_star*/
+      flip_inplace( f, var);
+      neg_variables[var] = true;
     }
+
+
 
     if( is_higher && is_less )    /* TT IS BINATE  */
       return false;
@@ -114,10 +120,11 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
     is_less = false;
 
   }
+  neg_variables.emplace_back(false);
 
   /* ONSET anf OFFSET*/
-  auto cube_ONSET = get_prime_implicants_morreale(tt);
-  auto tt_neg = unary_not(tt);
+  auto cube_ONSET = get_prime_implicants_morreale( f );
+  auto tt_neg = unary_not( f );
   auto cube_OFFSET = get_prime_implicants_morreale(tt_neg);
 
   /*The Constraints*/
@@ -167,7 +174,6 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
     for(uint64_t i = 0; i <= num_var; i++){
       constraint.weights.emplace_back(0);
     }
-   // constraint.variables.emplace_back(var);
     constraint.weights[var] = 1;
     constraint.constant = 0;
     constraint.type = G;
@@ -218,16 +224,25 @@ bool is_threshold(TT& tt, std::vector<int64_t>* plf = nullptr )
   }
 
   int ret = solve(lp);
-  if(ret == OPTIMAL){    //tt is TF
+  if(ret == OPTIMAL){    //f is TF
     /* objective value */
     printf("Objective value: %f\n", get_objective(lp));
 
     /* variable values */
     get_variables(lp, row.data());
-    for(uint64_t i = 0; i < num_var+1; i++){
-      /* push the weight and threshold values into `linear_form` */
-      linear_form.push_back((int)(row[i]));
+
+    int threshold = row[num_var];
+
+    for(uint64_t i = 0; i < num_var; i++){
+      if( neg_variables[i] )
+      {
+        linear_form.emplace_back(-row[i]);
+        threshold = threshold - row[i];
+      }
+      else
+        linear_form.emplace_back(row[i]);
     }
+    linear_form.emplace_back(threshold);
 
     /*print values*/
     for(uint64_t j = 0; j <= num_var +1; j++){
