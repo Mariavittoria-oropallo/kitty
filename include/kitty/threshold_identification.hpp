@@ -195,8 +195,9 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
   print_lp(lp);
   set_verbose(lp, IMPORTANT);
 
-  for(uint64_t col = 1; col<num_var+1; col++)
-    set_int(lp, col, TRUE);
+  for(auto i = 1u; i< num_var+1; i++){
+    set_int(lp, i, TRUE);
+  }
 
   int ret = solve(lp);
   if(ret == 0){    //f is TF
@@ -210,8 +211,8 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
     for(uint64_t i = 0; i<num_var; i++){
       linear_form.emplace_back(row[i]);
       if(neg_variables[i]){
-        linear_form[i] = -linear_form[i];
-        threshold_value = threshold_value + linear_form[i];
+        linear_form[i] = -row[i];
+        threshold_value += linear_form[i];
       }
     }
     linear_form.emplace_back(threshold_value);
