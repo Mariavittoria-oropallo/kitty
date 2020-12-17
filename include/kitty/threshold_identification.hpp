@@ -162,7 +162,7 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
   /*LP*/
 
   lprec *lp;
-  std::vector<double> row;  
+  std::vector<double> row;
 
   /* Create a new LP model */
   lp = make_lp(0, num_var+1);
@@ -174,10 +174,8 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
   set_add_rowmode(lp, TRUE);
 
   /*the objective function*/
-  row.emplace_back(1.0);  //first column value does not matter
-  for(uint64_t col = 1; col<=num_var+1; col++){
+  for(uint64_t col = 0; col<=num_var+1; col++){
     row.emplace_back( 1.0 );
-    set_int(lp, col, TRUE);
   }
 
   set_obj_fn(lp, row.data());
@@ -197,6 +195,9 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
   print_lp(lp);
   set_verbose(lp, IMPORTANT);
 
+  for(uint64_t col = 1; col<num_var+1; col++)
+    set_int(lp, col, TRUE);
+
   int ret = solve(lp);
   if(ret == 0){    //f is TF
 
@@ -204,13 +205,13 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
     get_variables(lp, row.data());
 
     /*get threshold value*/
-    int threshold_value = row[num_var];
+    int64_t threshold_value = row[num_var];
 
     for(uint64_t i = 0; i<num_var; i++){
       linear_form.emplace_back(row[i]);
       if(neg_variables[i]){
         linear_form[i] = -linear_form[i];
-        threshold_value += linear_form[i];
+        threshold_value = threshold_value + linear_form[i];
       }
     }
     linear_form.emplace_back(threshold_value);
