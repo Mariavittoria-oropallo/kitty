@@ -46,14 +46,13 @@
 
 
 enum Constraint_Type {
-  G , L, E
+  G , L
 };
-/* >=      <=  == */
+/* >=   <=  */
 
 struct Constraint {
   std::vector<int64_t> weights;
   Constraint_Type type;
-  int constant; /* the right-hand side constant */
 };
 
 
@@ -79,13 +78,11 @@ namespace kitty
 template<typename TT, typename = std::enable_if_t<is_complete_truth_table<TT>::value>>
 bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
 {
-  TT f = tt;
+  TT f = tt;  /* copy tt into f*/
+
   std::vector<int64_t> linear_form;
-  bool is_less = false;
-  bool is_higher = false;
 
   uint64_t num_var = f.num_vars();
-  uint64_t num_bit = f.num_bits();
 
   std::vector<bool> neg_variables(num_var, false);
 
@@ -96,62 +93,57 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
     auto const tt0 = cofactor0( f, var);
     auto const tt1 = cofactor1( f, var);
 
-    for(uint64_t j=0u; j<num_bit; j++){
-      if (get_bit(tt1, j) >  get_bit(tt0, j))
-        is_higher = true;
-
-      if (get_bit(tt1, j) <  get_bit(tt0, j))
-        is_less = true;
+    if (implies(tt1, tt0)){    //NEGATIVE UNATE
+      flip_inplace( f, var);   //Change f into f_star
+      neg_variables[var] = true;   //Keep track of changed variables
     }
 
+    else if(implies(tt0, tt1)) //POSITIVE UNATE
+      continue;
 
-    if( !is_higher && is_less ){ //NEGATIVE UNATE IN VARIABLE VAR
-      /*Change f into f_star*/
-      flip_inplace( f, var);
-      neg_variables[var] = true;
-    }
-
-
-
-    if( is_higher && is_less )    /* TT IS BINATE  */
+    else                       //BINATE
       return false;
-
-    is_higher = false;
-    is_less = false;
-
   }
-  neg_variables.emplace_back(false);
+
 
   /* ONSET anf OFFSET*/
-  auto cube_ONSET = get_prime_implicants_morreale( f );
-  auto tt_neg = unary_not( f );
-  auto cube_OFFSET = get_prime_implicants_morreale(tt_neg);
+  auto onset_cubes = get_prime_implicants_morreale( f );
+  auto offset_cubes = get_prime_implicants_morreale(unary_not(f));
 
   /*The Constraints*/
   std::vector<Constraint> constraints;
 
-  for (auto& i : cube_ONSET){
+  /*All weights have to be positive*/
+  for(uint64_t var = 0; var <= num_var; var++){
+    Constraint pos_w;
+    for(uint64_t i = 0; i <= num_var; i++)
+      pos_w.weights.emplace_back(0);
+    pos_w.weights[var] = 1;
+    pos_w.type = G;
+    constraints.emplace_back(pos_w);
+  }
+
+  for (auto& i : onset_cubes ){
     Constraint constraint;
     for(uint64_t var = 0; var < num_var; var++){
       if (i.get_mask(var) == 1){
-        if(i.get_bit(var) == 1){
-          constraint.weights.emplace_back(1);
+        if(i.get_bit(var) == 0){
+          constraint.weights.emplace_back(0);
         }
         else{
-          constraint.weights.emplace_back(0);
+          constraint.weights.emplace_back(1);
         }
       }
       else{
         constraint.weights.emplace_back(0);
       }
     }
-    constraint.weights.emplace_back(-1);
+    constraint.weights.emplace_back(-1);  //T weight
     constraint.type = G;
-    constraint.constant = 0;
     constraints.emplace_back(constraint);
   }
 
-  for (auto& i : cube_OFFSET){
+  for (auto& i : offset_cubes ){
     Constraint constraint;
     for(uint64_t var = 0; var < num_var; var++){
       if (i.get_mask(var) == 0){
@@ -161,22 +153,8 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
         constraint.weights.emplace_back(0);
       }
     }
-    constraint.weights.emplace_back(-1);
+    constraint.weights.emplace_back(-1); //T coefficient
     constraint.type = L;
-    constraint.constant = -1;
-    constraints.emplace_back(constraint);
-  }
-
-
-  /*Positive weights*/
-  for(uint64_t var = 0; var <= num_var; var++){
-    Constraint constraint;
-    for(uint64_t i = 0; i <= num_var; i++){
-      constraint.weights.emplace_back(0);
-    }
-    constraint.weights[var] = 1;
-    constraint.constant = 0;
-    constraint.type = G;
     constraints.emplace_back(constraint);
   }
 
@@ -184,34 +162,34 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
   /*LP*/
 
   lprec *lp;
-  auto num_rows = constraints.size();
-  std::vector<double> row;
+  std::vector<double> row;  
 
   /* Create a new LP model */
   lp = make_lp(0, num_var+1);
   if(lp == nullptr) {
-    fprintf(stderr, "Unable to create new LP model\n");
+    std::cout << "Unable to create new LP model\n";
     return(false);
   }
 
   set_add_rowmode(lp, TRUE);
 
   /*the objective function*/
-  row.emplace_back(1.0);
+  row.emplace_back(1.0);  //first column value does not matter
   for(uint64_t col = 1; col<=num_var+1; col++){
-    row.emplace_back(1.0);
+    row.emplace_back( 1.0 );
+    set_int(lp, col, TRUE);
   }
 
   set_obj_fn(lp, row.data());
 
-  for(uint64_t rows = 0; rows < num_rows; rows++){
-    for(uint64_t col = 1; col <= num_var+1; col++){
-      row[col] = constraints[rows].weights[col-1];
+  for(auto & constraint : constraints){
+    for(uint64_t i = 1; i <= num_var+1; i++){
+      row[i] = constraint.weights[i-1];
     }
-    if(constraints[rows].type == G )
-      add_constraint(lp, row.data(), GE, constraints[rows].constant);
-    else if (constraints[rows].type == L)
-      add_constraint(lp, row.data(), LE, constraints[rows].constant);
+    if(constraint.type == G )
+      add_constraint(lp, row.data(), GE, 0);
+    else if (constraint.type == L)
+      add_constraint(lp, row.data(), LE, -1);
   }
 
   set_add_rowmode(lp, FALSE);
@@ -219,44 +197,41 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
   print_lp(lp);
   set_verbose(lp, IMPORTANT);
 
-  for(auto i = 1u; i< num_var+1; i++){
-    set_int(lp, i, TRUE);
-  }
-
   int ret = solve(lp);
-  if(ret == OPTIMAL){    //f is TF
-    /* objective value */
-    printf("Objective value: %f\n", get_objective(lp));
+  if(ret == 0){    //f is TF
 
-    /* variable values */
+    /* get variables values */
     get_variables(lp, row.data());
 
-    int threshold = row[num_var];
+    /*get threshold value*/
+    int threshold_value = row[num_var];
 
-    for(uint64_t i = 0; i < num_var; i++){
-      if( neg_variables[i] )
-      {
-        linear_form.emplace_back(-row[i]);
-        threshold = threshold - row[i];
+    for(uint64_t i = 0; i<num_var; i++){
+      linear_form.emplace_back(row[i]);
+      if(neg_variables[i]){
+        linear_form[i] = -linear_form[i];
+        threshold_value += linear_form[i];
       }
-      else
-        linear_form.emplace_back(row[i]);
     }
-    linear_form.emplace_back(threshold);
+    linear_form.emplace_back(threshold_value);
+
+    /* objective value */
+    std::cout << "Objective value: \n" << get_objective(lp);
 
     /*print values*/
     for(uint64_t j = 0; j <= num_var +1; j++){
-      printf( "%s: %f\n", get_col_name( lp, j + 1 ), row[j] );
+      std::cout << get_col_name( lp, j + 1 ) << " " << row[j] ;
     }
+
   }
   else
-    return false;
+    return false;  /*no solution to the model*/
 
   if ( plf ){
     *plf = linear_form;
   }
+
   return true;
 }
-
 
 } /* namespace kitty */
