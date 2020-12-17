@@ -202,6 +202,9 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
   int ret = solve(lp);
   if(ret == 0){    //f is TF
 
+    /* objective value */
+    printf("Objective value: %f\n", get_objective(lp));
+
     /* get variables values */
     get_variables(lp, row.data());
 
@@ -228,12 +231,10 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
     }
     linear_form.emplace_back(threshold_value);
 
-    /* objective value */
-    std::cout << "Objective value: \n" << get_objective(lp);
 
     /*print values*/
     for(uint64_t j = 0; j <= num_var +1; j++){
-      std::cout << get_col_name( lp, j + 1 ) << " " << row[j] ;
+      printf( "%s: %f\n", get_col_name( lp, j + 1 ), row[j] );
     }
 
   }
