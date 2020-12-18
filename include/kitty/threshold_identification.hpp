@@ -211,23 +211,12 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
     /*get threshold value*/
     int64_t threshold_value = row[num_var];
 
-    /*for(uint64_t i = 0; i<num_var; i++){
+    for(uint64_t i = 0; i<num_var; i++){
       linear_form.emplace_back(row[i]);
       if(neg_variables[i]){
         linear_form[i] = -row[i];
         threshold_value += linear_form[i];
       }
-    }
-    linear_form.emplace_back(threshold_value);*/
-
-    for(uint64_t i = 0; i < num_var; i++){
-      if( neg_variables[i] )
-      {
-        linear_form.emplace_back(-row[i]);
-        threshold_value = threshold_value - row[i];
-      }
-      else
-        linear_form.emplace_back(row[i]);
     }
     linear_form.emplace_back(threshold_value);
 
@@ -236,7 +225,6 @@ bool is_threshold(const TT& tt, std::vector<int64_t>* plf = nullptr )
     for(uint64_t j = 0; j <= num_var +1; j++){
       printf( "%s: %f\n", get_col_name( lp, j + 1 ), row[j] );
     }
-
   }
   else
     return false;  /*no solution to the model*/
